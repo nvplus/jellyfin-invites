@@ -4,9 +4,6 @@ services:
     image: jellyfin-invites:latest
     restart: unless-stopped
     environment:
-      JELLYFIN_URL: ${JELLYFIN_URL:-http://jellyfin:8096}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8787}
-      SESSION_SECRET: ${SESSION_SECRET}
       DATABASE_PATH: /app/data/invites.db
       PORT: 8787
     ports:

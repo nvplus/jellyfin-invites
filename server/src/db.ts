@@ -34,4 +34,9 @@ db.exec(`
     created_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);

@@ -31,11 +31,6 @@ APP_PORT="${APP_PORT:-8787}"
 REPO_URL="${REPO_URL:-https://github.com/nvplus/jellyfin-invites.git}"
 REPO_REF="${REPO_REF:-main}"
 
-# Required: SESSION_SECRET, JELLYFIN_URL, PUBLIC_BASE_URL
-SESSION_SECRET="${SESSION_SECRET:-}"
-JELLYFIN_URL="${JELLYFIN_URL:-}"
-PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
-
 # Optional: set a root password (otherwise random); SSH key for root login
 ROOT_PASSWORD="${ROOT_PASSWORD:-}"
 SSH_PUBKEY_FILE="${SSH_PUBKEY_FILE:-}"      # path to a public key on the host
@@ -46,9 +41,6 @@ log() { echo "==> $*"; }
 
 command -v pct >/dev/null || err "this script must run on a Proxmox host (pct not found)"
 [[ $EUID -eq 0 ]] || err "run as root on the Proxmox host"
-[[ -n "$SESSION_SECRET" ]] || err "SESSION_SECRET is required (e.g. export SESSION_SECRET=\$(openssl rand -base64 48))"
-[[ -n "$JELLYFIN_URL" ]] || err "JELLYFIN_URL is required (e.g. http://192.168.1.10:8096)"
-[[ -n "$PUBLIC_BASE_URL" ]] || err "PUBLIC_BASE_URL is required (e.g. http://192.168.1.50:${APP_PORT})"
 
 if pct status "$CTID" >/dev/null 2>&1; then
   err "CTID $CTID already exists. Set CTID=<unused id> or destroy it first."
@@ -109,9 +101,6 @@ pct exec "$CTID" -- bash -lc "
 
 log "writing .env"
 pct exec "$CTID" -- bash -lc "cat > $APP_DIR/.env <<EOF
-JELLYFIN_URL=$JELLYFIN_URL
-PUBLIC_BASE_URL=$PUBLIC_BASE_URL
-SESSION_SECRET=$SESSION_SECRET
 DATABASE_PATH=$APP_DIR/data/invites.db
 PORT=$APP_PORT
 EOF
@@ -163,8 +152,10 @@ cat <<EOF
   Hostname:       $HOSTNAME
   Container IP:   ${CT_IP:-<unknown — check 'pct exec $CTID -- ip a'>}
   App URL:        http://${CT_IP:-<ip>}:${APP_PORT}
-  Public URL:     $PUBLIC_BASE_URL
   Root password:  $ROOT_PASSWORD
+
+  Open the App URL in a browser to finish setup
+  (you'll enter your Jellyfin URL + API key on first load).
 
   Logs:           pct exec $CTID -- journalctl -u jellyfin-invites -f
   Restart:        pct exec $CTID -- systemctl restart jellyfin-invites

@@ -1,6 +1,5 @@
 export type Invite = {
   token: string;
-  url: string;
   createdAt: number;
   expiresAt: number | null;
   maxUses: number;
@@ -8,6 +7,10 @@ export type Invite = {
   revoked: boolean;
   label: string | null;
 };
+
+export function inviteUrl(token: string): string {
+  return `${window.location.origin}/register/${token}`;
+}
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -18,12 +21,13 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  session: () => fetch("/api/session").then(json<{ authenticated: boolean }>),
-  login: (apiKey: string) =>
+  session: () =>
+    fetch("/api/session").then(json<{ authenticated: boolean; configured: boolean }>),
+  login: (input: { apiKey: string; jellyfinUrl?: string }) =>
     fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey }),
+      body: JSON.stringify(input),
     }).then(json<{ ok: true }>),
   logout: () => fetch("/api/session", { method: "DELETE" }).then(json<{ ok: true }>),
 

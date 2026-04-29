@@ -2,81 +2,45 @@
 
 A tiny invite-based registration page for a Jellyfin instance.
 
-- Admin signs in with a Jellyfin API key.
+- First launch: open the app and enter your Jellyfin URL + API key. That's it.
 - Admin generates invite links with optional expiry and max-uses.
 - Each link opens a registration page that creates a Jellyfin user via the Jellyfin API.
 
 Stack: Hono + better-sqlite3 (server), Vite + React (web), SQLite (storage).
 
-## Setup
+Zero config: the Jellyfin URL and session secret are stored in the SQLite database, not in env vars. You configure everything from the browser on first run.
+
+## Local development
 
 ```sh
-cp .env.example .env
-# edit .env, set JELLYFIN_URL and a long random SESSION_SECRET
 npm install
 npm run dev
 ```
 
-Visit http://localhost:5173.
+Visit http://localhost:5173. On first load you'll be asked for the Jellyfin URL and an API key (Jellyfin → Dashboard → API Keys).
 
-Generate a Jellyfin API key at: Jellyfin → Dashboard → API Keys.
-
-## Build
+## Build & run
 
 ```sh
 npm run build
 npm start
 ```
 
-The server runs on `PORT` (default 8787) and, when `web/dist` exists, also serves the built frontend — so one process = full app.
+The server runs on `PORT` (default 8787) and serves the built frontend from `web/dist`, so one process = full app. SQLite lives at `DATABASE_PATH` (default `./data/invites.db`).
 
 ## Deploy with Docker
 
-The included `Dockerfile` builds both server and web into a single image; `docker-compose.yml` wires it up with a persistent SQLite volume.
-
 ```sh
-# from the repo root
-docker compose build
-
-SESSION_SECRET=$(openssl rand -base64 48) \
-JELLYFIN_URL=http://your-jellyfin:8096 \
-PUBLIC_BASE_URL=https://invites.example.com \
-docker compose up -d
+docker compose up -d --build
 ```
 
-Then visit `PUBLIC_BASE_URL` (or `http://localhost:8787` locally).
+Then open `http://<host>:8787` and complete the setup form.
 
-Notes:
-
-- `SESSION_SECRET` must be a long random string. Generate once and keep it stable across deploys, or all sessions invalidate on restart.
-- `PUBLIC_BASE_URL` is the externally-visible URL — it's used to render invite links, so it must match what users will actually open.
-- `JELLYFIN_URL` is server-to-server. If Jellyfin runs in another container, use its service name (e.g. `http://jellyfin:8096`) and attach both services to the same Docker network.
-- SQLite lives on the `./data` bind mount. Back it up like any other small database.
-- Run behind HTTPS in production (Caddy, nginx, Traefik, etc.) — the session cookie is marked `Secure` only when `NODE_ENV=production`, which the image sets by default.
-
-## Deploy as a Proxmox LXC
-
-One-liner — run on the Proxmox host as root:
-
-```sh
-SESSION_SECRET=$(openssl rand -base64 48) \
-JELLYFIN_URL=http://192.168.1.10:8096 \
-PUBLIC_BASE_URL=http://192.168.1.50:8787 \
-bash <(curl -fsSL https://raw.githubusercontent.com/nvplus/jellyfin-invites/main/scripts/deploy-proxmox-lxc.sh)
-```
-
-This creates an unprivileged Debian 12 LXC, installs Node 20, clones this repo inside it, builds, and runs the app under systemd. Knobs (all optional env vars): `CTID`, `HOSTNAME`, `STORAGE`, `DISK_GB`, `MEMORY_MB`, `CORES`, `BRIDGE`, `IP_CONFIG` (defaults to `dhcp`), `APP_PORT`, `SSH_PUBKEY_FILE`.
-
-Logs / restart from the host:
-
-```sh
-pct exec <CTID> -- journalctl -u jellyfin-invites -f
-pct exec <CTID> -- systemctl restart jellyfin-invites
-```
+The only thing that needs to persist between deploys is the `./data` volume — it holds the SQLite database (which contains your config, session secret, and invites).
 
 ### Sharing a network with an existing Jellyfin stack
 
-If Jellyfin is already in a compose project, attach this service to the same external network:
+If Jellyfin is already in a compose project, attach this service to the same external network so it can reach Jellyfin by service name (e.g. `http://jellyfin:8096`):
 
 ```yaml
 services:
@@ -89,11 +53,30 @@ networks:
     external: true
 ```
 
-Then set `JELLYFIN_URL=http://jellyfin:8096` (or whatever the service is named).
+## Deploy as a Proxmox LXC
+
+True one-liner — run on the Proxmox host as root:
+
+```sh
+bash <(curl -fsSL https://raw.githubusercontent.com/nvplus/jellyfin-invites/main/scripts/deploy-proxmox-lxc.sh)
+```
+
+This creates an unprivileged Debian 12 LXC, installs Node 20, clones the repo, builds, and runs the app under systemd. When it finishes you'll get the container's IP — open it in a browser and complete setup.
+
+Knobs (all optional env vars): `CTID`, `HOSTNAME`, `STORAGE`, `DISK_GB`, `MEMORY_MB`, `CORES`, `BRIDGE`, `IP_CONFIG` (defaults to `dhcp`), `APP_PORT`, `SSH_PUBKEY_FILE`.
+
+Logs / restart from the host:
+
+```sh
+pct exec <CTID> -- journalctl -u jellyfin-invites -f
+pct exec <CTID> -- systemctl restart jellyfin-invites
+```
 
 ## Endpoints
 
-- `POST /api/session` — sign in with `{ apiKey }`
+- `GET /api/setup` — `{ configured }`
+- `GET /api/session` — `{ authenticated, configured }`
+- `POST /api/session` — sign in with `{ apiKey, jellyfinUrl? }` (URL required only on first setup)
 - `DELETE /api/session` — sign out
 - `GET /api/invites` — list invites (auth)
 - `POST /api/invites` — create `{ expiresInHours?, maxUses?, label? }` (auth)

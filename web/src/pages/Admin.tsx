@@ -1,20 +1,37 @@
 import { useEffect, useState } from "react";
-import { api, type Invite } from "../api";
+import { api, inviteUrl, type Invite } from "../api";
 
 export default function Admin() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [state, setState] = useState<
+    { kind: "loading" } | { kind: "anon"; configured: boolean } | { kind: "authed" }
+  >({ kind: "loading" });
 
   useEffect(() => {
-    api.session().then((s) => setAuthed(s.authenticated));
+    api.session().then((s) =>
+      setState(s.authenticated ? { kind: "authed" } : { kind: "anon", configured: s.configured }),
+    );
   }, []);
 
-  if (authed === null) return <div className="container">Loading…</div>;
-  if (!authed) return <Login onLoggedIn={() => setAuthed(true)} />;
-  return <Dashboard onLoggedOut={() => setAuthed(false)} />;
+  if (state.kind === "loading") return <div className="container">Loading…</div>;
+  if (state.kind === "anon")
+    return (
+      <Login
+        configured={state.configured}
+        onLoggedIn={() => setState({ kind: "authed" })}
+      />
+    );
+  return <Dashboard onLoggedOut={() => setState({ kind: "anon", configured: true })} />;
 }
 
-function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
+function Login({
+  configured,
+  onLoggedIn,
+}: {
+  configured: boolean;
+  onLoggedIn: () => void;
+}) {
   const [apiKey, setApiKey] = useState("");
+  const [jellyfinUrl, setJellyfinUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -23,7 +40,10 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     setError(null);
     setBusy(true);
     try {
-      await api.login(apiKey);
+      await api.login({
+        apiKey: apiKey.trim(),
+        jellyfinUrl: configured ? undefined : jellyfinUrl.trim(),
+      });
       onLoggedIn();
     } catch (err) {
       setError((err as Error).message);
@@ -32,15 +52,34 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   }
 
+  const canSubmit = apiKey.trim() && (configured || jellyfinUrl.trim());
+
   return (
     <div className="container">
       <h1>Jellyfin Invites</h1>
-      <p className="muted">Sign in with a Jellyfin API key to manage invites.</p>
+      <p className="muted">
+        {configured
+          ? "Sign in with a Jellyfin API key to manage invites."
+          : "First-time setup. Point this at your Jellyfin server and sign in."}
+      </p>
       <div className="note">
         Generate an API key in Jellyfin → Dashboard → API Keys. The key is
         admin-equivalent — anyone with it can manage your Jellyfin server.
       </div>
       <form onSubmit={submit}>
+        {!configured && (
+          <div className="field">
+            <label htmlFor="jellyfinUrl">Jellyfin URL</label>
+            <input
+              id="jellyfinUrl"
+              type="text"
+              value={jellyfinUrl}
+              onChange={(e) => setJellyfinUrl(e.target.value)}
+              placeholder="http://192.168.1.10:8096"
+              autoFocus
+            />
+          </div>
+        )}
         <div className="field">
           <label htmlFor="apiKey">API Key</label>
           <input
@@ -49,11 +88,11 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="paste your Jellyfin API key"
-            autoFocus
+            autoFocus={configured}
           />
         </div>
-        <button type="submit" disabled={busy || !apiKey.trim()}>
-          {busy ? "Verifying…" : "Sign in"}
+        <button type="submit" disabled={busy || !canSubmit}>
+          {busy ? "Verifying…" : configured ? "Sign in" : "Save & sign in"}
         </button>
         {error && <div className="error">{error}</div>}
       </form>
@@ -202,7 +241,7 @@ function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void 
         : "valid";
 
   async function copy() {
-    await navigator.clipboard.writeText(invite.url);
+    await navigator.clipboard.writeText(inviteUrl(invite.token));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }

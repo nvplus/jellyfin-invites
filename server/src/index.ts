@@ -6,25 +6,47 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { db } from "./db.js";
 import { env } from "./env.js";
+import {
+  ensureSessionSecret,
+  getJellyfinUrl,
+  isConfigured,
+  setJellyfinUrl,
+} from "./config.js";
 import { createSession, destroySession, getSession } from "./session.js";
 import { createUser, userExists, verifyApiKey } from "./jellyfin.js";
 
+ensureSessionSecret();
+
 const app = new Hono();
+
+app.get("/api/setup", (c) => {
+  return c.json({ configured: isConfigured() });
+});
 
 app.get("/api/session", (c) => {
   const s = getSession(c);
-  return c.json({ authenticated: !!s });
+  return c.json({ authenticated: !!s, configured: isConfigured() });
 });
 
 app.post("/api/session", async (c) => {
-  const body = await c.req.json().catch(() => null);
-  const apiKey = body?.apiKey;
-  if (typeof apiKey !== "string" || !apiKey.trim()) {
-    return c.json({ error: "apiKey required" }, 400);
+  const body = (await c.req.json().catch(() => null)) as
+    | { apiKey?: string; jellyfinUrl?: string }
+    | null;
+  const apiKey = body?.apiKey?.trim();
+  if (!apiKey) return c.json({ error: "apiKey required" }, 400);
+
+  let jellyfinUrl = getJellyfinUrl();
+  if (!jellyfinUrl) {
+    const provided = body?.jellyfinUrl?.trim();
+    if (!provided) return c.json({ error: "jellyfinUrl required on first setup" }, 400);
+    jellyfinUrl = provided.replace(/\/$/, "");
   }
-  const ok = await verifyApiKey(apiKey.trim());
-  if (!ok) return c.json({ error: "Jellyfin rejected this API key" }, 401);
-  createSession(c, apiKey.trim());
+
+  const ok = await verifyApiKey(jellyfinUrl, apiKey);
+  if (!ok) return c.json({ error: "Jellyfin rejected this URL or API key" }, 401);
+
+  if (!isConfigured()) setJellyfinUrl(jellyfinUrl);
+  createSession(c, apiKey);
   return c.json({ ok: true });
 });
 
@@ -57,7 +79,6 @@ app.get("/api/invites", (c) => {
   return c.json({
     invites: rows.map((r) => ({
       token: r.token,
-      url: `${env.PUBLIC_BASE_URL}/register/${r.token}`,
       createdAt: r.created_at,
       expiresAt: r.expires_at,
       maxUses: r.max_uses,
@@ -88,7 +109,6 @@ app.post("/api/invites", async (c) => {
   ).run(token, now, expiresAt, maxUses, label);
   return c.json({
     token,
-    url: `${env.PUBLIC_BASE_URL}/register/${token}`,
     createdAt: now,
     expiresAt,
     maxUses,
@@ -147,6 +167,9 @@ app.post("/api/register", async (c) => {
     return c.json({ error: "username/password too short" }, 400);
   }
 
+  const jellyfinUrl = getJellyfinUrl();
+  if (!jellyfinUrl) return c.json({ error: "server not configured" }, 503);
+
   const row = db
     .prepare(
       `SELECT token, expires_at, max_uses, uses, revoked FROM invites WHERE token = ?`,
@@ -158,19 +181,18 @@ app.post("/api/register", async (c) => {
   const status = inviteStatus(row);
   if (status !== "valid") return c.json({ error: `invite ${status}` }, 400);
 
-  // Use the most-recent admin session's API key to call Jellyfin.
   const admin = db
     .prepare("SELECT api_key FROM sessions ORDER BY last_seen_at DESC LIMIT 1")
     .get() as { api_key: string } | undefined;
   if (!admin) return c.json({ error: "no admin session available" }, 503);
 
-  if (await userExists(admin.api_key, username)) {
+  if (await userExists(jellyfinUrl, admin.api_key, username)) {
     return c.json({ error: "username already taken" }, 409);
   }
 
   let user: { id: string };
   try {
-    user = await createUser(admin.api_key, username, password);
+    user = await createUser(jellyfinUrl, admin.api_key, username, password);
   } catch (e) {
     return c.json({ error: (e as Error).message }, 502);
   }
@@ -184,12 +206,12 @@ app.post("/api/register", async (c) => {
   });
   tx();
 
-  return c.json({ ok: true, jellyfinUrl: env.JELLYFIN_URL });
+  return c.json({ ok: true, jellyfinUrl });
 });
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 
-// Serve the built web app, if present (production / Docker).
+// Serve the built web app, if present (production / Docker / LXC).
 const webDist = resolve(process.cwd(), "web/dist");
 if (existsSync(webDist)) {
   app.use("/*", serveStatic({ root: "./web/dist" }));
@@ -197,6 +219,6 @@ if (existsSync(webDist)) {
   app.get("*", (c) => c.html(indexHtml));
 }
 
-serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`server listening on http://localhost:${info.port}`);
+serve({ fetch: app.fetch, port: env.PORT, hostname: "0.0.0.0" }, (info) => {
+  console.log(`server listening on http://0.0.0.0:${info.port}`);
 });
