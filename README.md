@@ -62,7 +62,7 @@ One-liner — run on the Proxmox host as root:
 SESSION_SECRET=$(openssl rand -base64 48) \
 JELLYFIN_URL=http://192.168.1.10:8096 \
 PUBLIC_BASE_URL=http://192.168.1.50:8787 \
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USER/jellyfin-invites/main/scripts/deploy-proxmox-lxc.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/nvplus/jellyfin-invites/main/scripts/deploy-proxmox-lxc.sh)
 ```
 
 This creates an unprivileged Debian 12 LXC, installs Node 20, clones this repo inside it, builds, and runs the app under systemd. Knobs (all optional env vars): `CTID`, `HOSTNAME`, `STORAGE`, `DISK_GB`, `MEMORY_MB`, `CORES`, `BRIDGE`, `IP_CONFIG` (defaults to `dhcp`), `APP_PORT`, `SSH_PUBKEY_FILE`.

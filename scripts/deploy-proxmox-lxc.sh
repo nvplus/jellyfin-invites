@@ -28,7 +28,7 @@ APP_PORT="${APP_PORT:-8787}"
 
 # Where to fetch the repo from when running standalone (curl | bash).
 # Override with REPO_URL=... or REPO_REF=... (branch/tag/commit).
-REPO_URL="${REPO_URL:-https://github.com/YOUR_USER/jellyfin-invites.git}"
+REPO_URL="${REPO_URL:-https://github.com/nvplus/jellyfin-invites.git}"
 REPO_REF="${REPO_REF:-main}"
 
 # Required: SESSION_SECRET, JELLYFIN_URL, PUBLIC_BASE_URL
