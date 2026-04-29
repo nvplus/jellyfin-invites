@@ -32,6 +32,7 @@ function Login({
 }) {
   const [apiKey, setApiKey] = useState("");
   const [jellyfinUrl, setJellyfinUrl] = useState("");
+  const [publicJellyfinUrl, setPublicJellyfinUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,6 +44,8 @@ function Login({
       await api.login({
         apiKey: apiKey.trim(),
         jellyfinUrl: configured ? undefined : jellyfinUrl.trim(),
+        publicJellyfinUrl:
+          configured || !publicJellyfinUrl.trim() ? undefined : publicJellyfinUrl.trim(),
       });
       onLoggedIn();
     } catch (err) {
@@ -68,17 +71,35 @@ function Login({
       </div>
       <form onSubmit={submit}>
         {!configured && (
-          <div className="field">
-            <label htmlFor="jellyfinUrl">Jellyfin URL</label>
-            <input
-              id="jellyfinUrl"
-              type="text"
-              value={jellyfinUrl}
-              onChange={(e) => setJellyfinUrl(e.target.value)}
-              placeholder="http://192.168.1.10:8096"
-              autoFocus
-            />
-          </div>
+          <>
+            <div className="field">
+              <label htmlFor="jellyfinUrl">Jellyfin URL</label>
+              <input
+                id="jellyfinUrl"
+                type="text"
+                value={jellyfinUrl}
+                onChange={(e) => setJellyfinUrl(e.target.value)}
+                placeholder="http://192.168.1.10:8096"
+                autoFocus
+              />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Used by this app to talk to Jellyfin (server-to-server).
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="publicJellyfinUrl">Public Jellyfin URL (optional)</label>
+              <input
+                id="publicJellyfinUrl"
+                type="text"
+                value={publicJellyfinUrl}
+                onChange={(e) => setPublicJellyfinUrl(e.target.value)}
+                placeholder="https://jellyfin.example.com"
+              />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Shown to users after registration. Defaults to the URL above if blank.
+              </div>
+            </div>
+          </>
         )}
         <div className="field">
           <label htmlFor="apiKey">API Key</label>
@@ -203,6 +224,8 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
         {error && <div className="error">{error}</div>}
       </form>
 
+      <Settings />
+
       <h2>Existing</h2>
       {invites.length === 0 ? (
         <p className="muted">No invites yet.</p>
@@ -226,6 +249,83 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
         </table>
       )}
     </div>
+  );
+}
+
+function Settings() {
+  const [jellyfinUrl, setJellyfinUrl] = useState("");
+  const [publicJellyfinUrl, setPublicJellyfinUrl] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      setJellyfinUrl(c.jellyfinUrl ?? "");
+      setPublicJellyfinUrl(c.publicJellyfinUrl ?? "");
+      setLoaded(true);
+    });
+  }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.updateConfig({
+        jellyfinUrl: jellyfinUrl.trim(),
+        publicJellyfinUrl: publicJellyfinUrl.trim() || null,
+      });
+      setMsg({ kind: "ok", text: "Saved." });
+    } catch (e) {
+      setMsg({ kind: "err", text: (e as Error).message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <>
+      <h2 style={{ cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
+        Settings {open ? "▾" : "▸"}
+      </h2>
+      {open && (
+        <form onSubmit={save}>
+          <div className="field">
+            <label htmlFor="cfg-url">Jellyfin URL</label>
+            <input
+              id="cfg-url"
+              type="text"
+              value={jellyfinUrl}
+              onChange={(e) => setJellyfinUrl(e.target.value)}
+            />
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Used by this app to talk to Jellyfin (server-to-server).
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="cfg-pub">Public Jellyfin URL (optional)</label>
+            <input
+              id="cfg-pub"
+              type="text"
+              value={publicJellyfinUrl}
+              onChange={(e) => setPublicJellyfinUrl(e.target.value)}
+              placeholder="leave blank to reuse the URL above"
+            />
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Shown to users after registration.
+            </div>
+          </div>
+          <button type="submit" disabled={saving || !jellyfinUrl.trim()}>
+            {saving ? "Saving…" : "Save settings"}
+          </button>
+          {msg && <div className={msg.kind === "ok" ? "success" : "error"}>{msg.text}</div>}
+        </form>
+      )}
+    </>
   );
 }
 

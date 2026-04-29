@@ -23,13 +23,24 @@ async function json<T>(res: Response): Promise<T> {
 export const api = {
   session: () =>
     fetch("/api/session").then(json<{ authenticated: boolean; configured: boolean }>),
-  login: (input: { apiKey: string; jellyfinUrl?: string }) =>
+  login: (input: { apiKey: string; jellyfinUrl?: string; publicJellyfinUrl?: string }) =>
     fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     }).then(json<{ ok: true }>),
   logout: () => fetch("/api/session", { method: "DELETE" }).then(json<{ ok: true }>),
+
+  getConfig: () =>
+    fetch("/api/config").then(
+      json<{ jellyfinUrl: string | null; publicJellyfinUrl: string | null }>,
+    ),
+  updateConfig: (input: { jellyfinUrl?: string; publicJellyfinUrl?: string | null }) =>
+    fetch("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }).then(json<{ jellyfinUrl: string | null; publicJellyfinUrl: string | null }>),
 
   listInvites: () => fetch("/api/invites").then(json<{ invites: Invite[] }>),
   createInvite: (input: { expiresInHours?: number; maxUses?: number; label?: string }) =>

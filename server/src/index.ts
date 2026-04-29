@@ -9,8 +9,10 @@ import { env } from "./env.js";
 import {
   ensureSessionSecret,
   getJellyfinUrl,
+  getPublicJellyfinUrl,
   isConfigured,
   setJellyfinUrl,
+  setPublicJellyfinUrl,
 } from "./config.js";
 import { createSession, destroySession, getSession } from "./session.js";
 import { createUser, userExists, verifyApiKey } from "./jellyfin.js";
@@ -30,11 +32,12 @@ app.get("/api/session", (c) => {
 
 app.post("/api/session", async (c) => {
   const body = (await c.req.json().catch(() => null)) as
-    | { apiKey?: string; jellyfinUrl?: string }
+    | { apiKey?: string; jellyfinUrl?: string; publicJellyfinUrl?: string }
     | null;
   const apiKey = body?.apiKey?.trim();
   if (!apiKey) return c.json({ error: "apiKey required" }, 400);
 
+  const firstSetup = !isConfigured();
   let jellyfinUrl = getJellyfinUrl();
   if (!jellyfinUrl) {
     const provided = body?.jellyfinUrl?.trim();
@@ -45,7 +48,12 @@ app.post("/api/session", async (c) => {
   const ok = await verifyApiKey(jellyfinUrl, apiKey);
   if (!ok) return c.json({ error: "Jellyfin rejected this URL or API key" }, 401);
 
-  if (!isConfigured()) setJellyfinUrl(jellyfinUrl);
+  if (firstSetup) {
+    setJellyfinUrl(jellyfinUrl);
+    if (body?.publicJellyfinUrl?.trim()) {
+      setPublicJellyfinUrl(body.publicJellyfinUrl);
+    }
+  }
   createSession(c, apiKey);
   return c.json({ ok: true });
 });
@@ -55,10 +63,43 @@ app.delete("/api/session", (c) => {
   return c.json({ ok: true });
 });
 
-app.use("/api/invites/*", async (c, next) => {
+const requireAuth: Parameters<typeof app.use>[1] = async (c, next) => {
   const s = getSession(c);
   if (!s) return c.json({ error: "unauthorized" }, 401);
   await next();
+};
+
+app.use("/api/invites/*", requireAuth);
+app.use("/api/config", requireAuth);
+
+app.get("/api/config", (c) => {
+  return c.json({
+    jellyfinUrl: getJellyfinUrl(),
+    publicJellyfinUrl: getPublicJellyfinUrl(),
+  });
+});
+
+app.put("/api/config", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    jellyfinUrl?: string;
+    publicJellyfinUrl?: string | null;
+  };
+  if (typeof body.jellyfinUrl === "string") {
+    const url = body.jellyfinUrl.trim();
+    if (!url) return c.json({ error: "jellyfinUrl cannot be empty" }, 400);
+    const apiKey = getSession(c)!.apiKey;
+    if (!(await verifyApiKey(url, apiKey))) {
+      return c.json({ error: "Jellyfin rejected this URL with the current API key" }, 400);
+    }
+    setJellyfinUrl(url);
+  }
+  if (body.publicJellyfinUrl !== undefined) {
+    setPublicJellyfinUrl(body.publicJellyfinUrl);
+  }
+  return c.json({
+    jellyfinUrl: getJellyfinUrl(),
+    publicJellyfinUrl: getPublicJellyfinUrl(),
+  });
 });
 
 app.get("/api/invites", (c) => {
@@ -206,7 +247,7 @@ app.post("/api/register", async (c) => {
   });
   tx();
 
-  return c.json({ ok: true, jellyfinUrl });
+  return c.json({ ok: true, jellyfinUrl: getPublicJellyfinUrl() ?? jellyfinUrl });
 });
 
 app.get("/api/health", (c) => c.json({ ok: true }));

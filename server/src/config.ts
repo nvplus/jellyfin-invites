@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { db } from "./db.js";
 
-type Key = "jellyfin_url" | "session_secret";
+type Key = "jellyfin_url" | "public_jellyfin_url" | "session_secret";
 
 export function getConfig(key: Key): string | null {
   const row = db.prepare("SELECT value FROM config WHERE key = ?").get(key) as
@@ -35,6 +35,18 @@ export function getJellyfinUrl(): string | null {
 
 export function setJellyfinUrl(url: string): void {
   setConfig("jellyfin_url", url.replace(/\/$/, ""));
+}
+
+export function getPublicJellyfinUrl(): string | null {
+  return getConfig("public_jellyfin_url");
+}
+
+export function setPublicJellyfinUrl(url: string | null): void {
+  if (!url || !url.trim()) {
+    db.prepare("DELETE FROM config WHERE key = ?").run("public_jellyfin_url");
+    return;
+  }
+  setConfig("public_jellyfin_url", url.trim().replace(/\/$/, ""));
 }
 
 export function isConfigured(): boolean {
