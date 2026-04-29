@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import { createSession, destroySession, getSession } from "./session.js";
@@ -33,7 +36,6 @@ app.delete("/api/session", (c) => {
 app.use("/api/invites/*", async (c, next) => {
   const s = getSession(c);
   if (!s) return c.json({ error: "unauthorized" }, 401);
-  c.set("session", s);
   await next();
 });
 
@@ -186,6 +188,14 @@ app.post("/api/register", async (c) => {
 });
 
 app.get("/api/health", (c) => c.json({ ok: true }));
+
+// Serve the built web app, if present (production / Docker).
+const webDist = resolve(process.cwd(), "web/dist");
+if (existsSync(webDist)) {
+  app.use("/*", serveStatic({ root: "./web/dist" }));
+  const indexHtml = readFileSync(resolve(webDist, "index.html"), "utf8");
+  app.get("*", (c) => c.html(indexHtml));
+}
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`server listening on http://localhost:${info.port}`);

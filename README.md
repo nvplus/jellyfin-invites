@@ -28,7 +28,48 @@ npm run build
 npm start
 ```
 
-The server runs on `PORT` (default 8787); the built web app lives in `web/dist` and can be served by any static host (or wired into the server with another two lines).
+The server runs on `PORT` (default 8787) and, when `web/dist` exists, also serves the built frontend — so one process = full app.
+
+## Deploy with Docker
+
+The included `Dockerfile` builds both server and web into a single image; `docker-compose.yml` wires it up with a persistent SQLite volume.
+
+```sh
+# from the repo root
+docker compose build
+
+SESSION_SECRET=$(openssl rand -base64 48) \
+JELLYFIN_URL=http://your-jellyfin:8096 \
+PUBLIC_BASE_URL=https://invites.example.com \
+docker compose up -d
+```
+
+Then visit `PUBLIC_BASE_URL` (or `http://localhost:8787` locally).
+
+Notes:
+
+- `SESSION_SECRET` must be a long random string. Generate once and keep it stable across deploys, or all sessions invalidate on restart.
+- `PUBLIC_BASE_URL` is the externally-visible URL — it's used to render invite links, so it must match what users will actually open.
+- `JELLYFIN_URL` is server-to-server. If Jellyfin runs in another container, use its service name (e.g. `http://jellyfin:8096`) and attach both services to the same Docker network.
+- SQLite lives on the `./data` bind mount. Back it up like any other small database.
+- Run behind HTTPS in production (Caddy, nginx, Traefik, etc.) — the session cookie is marked `Secure` only when `NODE_ENV=production`, which the image sets by default.
+
+### Sharing a network with an existing Jellyfin stack
+
+If Jellyfin is already in a compose project, attach this service to the same external network:
+
+```yaml
+services:
+  invites:
+    # ...
+    networks:
+      - jellyfin_default
+networks:
+  jellyfin_default:
+    external: true
+```
+
+Then set `JELLYFIN_URL=http://jellyfin:8096` (or whatever the service is named).
 
 ## Endpoints
 
