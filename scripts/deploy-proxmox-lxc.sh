@@ -14,7 +14,8 @@ set -euo pipefail
 # ---------- config ----------
 # CTID defaults to (highest existing CT/VM id) + 1, or 100 if none exist.
 CTID="${CTID:-}"
-HOSTNAME="${HOSTNAME:-jellyfin-invites}"
+# NOTE: do not use $HOSTNAME — it's a shell builtin holding the node's name.
+CT_HOSTNAME="${CT_HOSTNAME:-jellyfin-invites}"
 STORAGE="${STORAGE:-local-lvm}"             # rootfs storage pool
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 DISK_GB="${DISK_GB:-4}"
@@ -45,9 +46,9 @@ command -v pct >/dev/null || err "this script must run on a Proxmox host (pct no
 
 # Interactive prompts (skipped if values already set via env or no tty available).
 if [[ -t 0 ]]; then
-  if [[ -z "${HOSTNAME_SET:-}" ]] && [[ "${HOSTNAME}" == "jellyfin-invites" ]]; then
+  if [[ "$CT_HOSTNAME" == "jellyfin-invites" ]]; then
     read -r -p "Container hostname [jellyfin-invites]: " input || true
-    [[ -n "$input" ]] && HOSTNAME="$input"
+    [[ -n "$input" ]] && CT_HOSTNAME="$input"
   fi
   if [[ -z "$ROOT_PASSWORD" ]]; then
     while :; do
@@ -97,7 +98,7 @@ if [[ -z "$ROOT_PASSWORD" ]]; then
 fi
 
 CREATE_ARGS=(
-  --hostname "$HOSTNAME"
+  --hostname "$CT_HOSTNAME"
   --cores "$CORES"
   --memory "$MEMORY_MB"
   --swap "$SWAP_MB"
@@ -113,7 +114,7 @@ if [[ -n "$SSH_PUBKEY_FILE" ]]; then
   CREATE_ARGS+=(--ssh-public-keys "$SSH_PUBKEY_FILE")
 fi
 
-log "creating container $CTID ($HOSTNAME)"
+log "creating container $CTID ($CT_HOSTNAME)"
 pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" "${CREATE_ARGS[@]}"
 
 log "starting container"
@@ -188,7 +189,7 @@ cat <<EOF
   jellyfin-invites is deployed
 ----------------------------------------------------------
   CTID:           $CTID
-  Hostname:       $HOSTNAME
+  Hostname:       $CT_HOSTNAME
   Container IP:   ${CT_IP:-<unknown — check 'pct exec $CTID -- ip a'>}
   App URL:        http://${CT_IP:-<ip>}:${APP_PORT}
   Root password:  $ROOT_PASSWORD
