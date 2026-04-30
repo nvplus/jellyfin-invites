@@ -72,6 +72,18 @@ pct exec <CTID> -- journalctl -u jellyfin-invites -f
 pct exec <CTID> -- systemctl restart jellyfin-invites
 ```
 
+### Updating to a newer version
+
+After pushing changes to GitHub, run from the Proxmox host:
+
+```sh
+pct exec <CTID> -- /opt/jellyfin-invites/scripts/update.sh
+```
+
+That script `git pull`s the latest `main`, reinstalls dependencies, rebuilds, and restarts the systemd service. Your SQLite database in `/opt/jellyfin-invites/data/` is untouched, so config and invites persist across upgrades.
+
+If the update script itself changed in the new commit, the next run will pick up the new version (it pulls before doing anything else). If it ever gets out of sync, you can always re-run the deploy one-liner with the same `CTID` after destroying the container — but you'd lose the database, so back up `/opt/jellyfin-invites/data/invites.db` first.
+
 ## Endpoints
 
 - `GET /api/setup` — `{ configured }`
