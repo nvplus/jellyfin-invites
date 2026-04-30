@@ -43,6 +43,28 @@ log() { echo "==> $*"; }
 command -v pct >/dev/null || err "this script must run on a Proxmox host (pct not found)"
 [[ $EUID -eq 0 ]] || err "run as root on the Proxmox host"
 
+# Interactive prompts (skipped if values already set via env or no tty available).
+if [[ -t 0 ]]; then
+  if [[ -z "${HOSTNAME_SET:-}" ]] && [[ "${HOSTNAME}" == "jellyfin-invites" ]]; then
+    read -r -p "Container hostname [jellyfin-invites]: " input || true
+    [[ -n "$input" ]] && HOSTNAME="$input"
+  fi
+  if [[ -z "$ROOT_PASSWORD" ]]; then
+    while :; do
+      read -r -s -p "Root password (leave blank for random): " p1; echo
+      if [[ -z "$p1" ]]; then
+        break
+      fi
+      read -r -s -p "Confirm password: " p2; echo
+      if [[ "$p1" == "$p2" ]]; then
+        ROOT_PASSWORD="$p1"
+        break
+      fi
+      echo "Passwords didn't match, try again."
+    done
+  fi
+fi
+
 # Pick the next CTID: max(existing CT/VM ids) + 1, floor of 100.
 if [[ -z "$CTID" ]]; then
   highest=$(
