@@ -81,6 +81,8 @@ th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #2a2d35; 
 th { color: #9aa0a6; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 td.token { font-family: ui-monospace, monospace; font-size: 12px; color: #b9bcc2; }
 .status-valid { color: #4ade80; }
-.status-revoked, .status-expired, .status-exhausted { color: #9aa0a6; }
+.status-revoked, .status-expired, .status-used { color: #9aa0a6; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; }
+
+.buttonContainer { display: flex; justify-content: flex-end; }

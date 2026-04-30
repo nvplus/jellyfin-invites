@@ -15,7 +15,13 @@ import {
   setPublicJellyfinUrl,
 } from "./config.js";
 import { createSession, destroySession, getSession } from "./session.js";
-import { createUser, userExists, verifyApiKey } from "./jellyfin.js";
+import {
+  createUser,
+  getLibraries,
+  setUserLibraries,
+  userExists,
+  verifyApiKey,
+} from "./jellyfin.js";
 
 ensureSessionSecret();
 
@@ -71,6 +77,7 @@ const requireAuth: Parameters<typeof app.use>[1] = async (c, next) => {
 
 app.use("/api/invites/*", requireAuth);
 app.use("/api/config", requireAuth);
+app.use("/api/libraries", requireAuth);
 
 app.get("/api/config", (c) => {
   return c.json({
@@ -102,60 +109,87 @@ app.put("/api/config", async (c) => {
   });
 });
 
+app.get("/api/libraries", async (c) => {
+  const jellyfinUrl = getJellyfinUrl();
+  if (!jellyfinUrl) return c.json({ error: "not configured" }, 503);
+  const apiKey = getSession(c)!.apiKey;
+  try {
+    const libraries = await getLibraries(jellyfinUrl, apiKey);
+    return c.json({ libraries });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 502);
+  }
+});
+
+function parseLibraryIds(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : null;
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/invites", (c) => {
   const rows = db
     .prepare(
-      `SELECT token, created_at, expires_at, max_uses, uses, revoked, label
-       FROM invites ORDER BY created_at DESC`,
+      `SELECT i.token, i.created_at, i.expires_at, i.uses, i.revoked,
+              i.allowed_library_ids, r.username
+       FROM invites i
+       LEFT JOIN registrations r ON r.invite_token = i.token
+       ORDER BY i.created_at DESC`,
     )
     .all() as Array<{
     token: string;
     created_at: number;
     expires_at: number | null;
-    max_uses: number;
     uses: number;
     revoked: number;
-    label: string | null;
+    allowed_library_ids: string | null;
+    username: string | null;
   }>;
   return c.json({
     invites: rows.map((r) => ({
       token: r.token,
       createdAt: r.created_at,
       expiresAt: r.expires_at,
-      maxUses: r.max_uses,
-      uses: r.uses,
+      used: r.uses > 0,
       revoked: !!r.revoked,
-      label: r.label,
+      registeredAs: r.username,
+      allowedLibraryIds: parseLibraryIds(r.allowed_library_ids),
     })),
   });
 });
 
+const DEFAULT_EXPIRY_HOURS = 12;
+
 app.post("/api/invites", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     expiresInHours?: number;
-    maxUses?: number;
-    label?: string;
+    allowedLibraryIds?: string[] | null;
   };
   const token = randomBytes(24).toString("base64url");
   const now = Date.now();
-  const expiresAt =
-    typeof body.expiresInHours === "number" && body.expiresInHours > 0
-      ? now + body.expiresInHours * 3600_000
+  const hours =
+    typeof body.expiresInHours === "number" ? body.expiresInHours : DEFAULT_EXPIRY_HOURS;
+  const expiresAt = hours > 0 ? now + hours * 3600_000 : null;
+  const allowedLibraryIds =
+    Array.isArray(body.allowedLibraryIds)
+      ? body.allowedLibraryIds.filter((x): x is string => typeof x === "string")
       : null;
-  const maxUses = typeof body.maxUses === "number" && body.maxUses > 0 ? body.maxUses : 1;
-  const label = body.label?.trim() || null;
   db.prepare(
-    `INSERT INTO invites (token, created_at, expires_at, max_uses, uses, revoked, label)
-     VALUES (?, ?, ?, ?, 0, 0, ?)`,
-  ).run(token, now, expiresAt, maxUses, label);
+    `INSERT INTO invites (token, created_at, expires_at, max_uses, uses, revoked, label, allowed_library_ids)
+     VALUES (?, ?, ?, 1, 0, 0, NULL, ?)`,
+  ).run(token, now, expiresAt, allowedLibraryIds ? JSON.stringify(allowedLibraryIds) : null);
   return c.json({
     token,
     createdAt: now,
     expiresAt,
-    maxUses,
-    uses: 0,
+    used: false,
     revoked: false,
-    label,
+    registeredAs: null,
+    allowedLibraryIds,
   });
 });
 
@@ -213,10 +247,18 @@ app.post("/api/register", async (c) => {
 
   const row = db
     .prepare(
-      `SELECT token, expires_at, max_uses, uses, revoked FROM invites WHERE token = ?`,
+      `SELECT token, expires_at, max_uses, uses, revoked, allowed_library_ids
+       FROM invites WHERE token = ?`,
     )
     .get(token) as
-    | { token: string; expires_at: number | null; max_uses: number; uses: number; revoked: number }
+    | {
+        token: string;
+        expires_at: number | null;
+        max_uses: number;
+        uses: number;
+        revoked: number;
+        allowed_library_ids: string | null;
+      }
     | undefined;
   if (!row) return c.json({ error: "invite not found" }, 404);
   const status = inviteStatus(row);
@@ -236,6 +278,15 @@ app.post("/api/register", async (c) => {
     user = await createUser(jellyfinUrl, admin.api_key, username, password);
   } catch (e) {
     return c.json({ error: (e as Error).message }, 502);
+  }
+
+  const allowedLibraryIds = parseLibraryIds(row.allowed_library_ids);
+  if (allowedLibraryIds !== null) {
+    try {
+      await setUserLibraries(jellyfinUrl, admin.api_key, user.id, allowedLibraryIds);
+    } catch (e) {
+      console.error("failed to apply library policy:", (e as Error).message);
+    }
   }
 
   const tx = db.transaction(() => {

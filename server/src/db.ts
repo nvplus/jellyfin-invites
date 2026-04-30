@@ -40,3 +40,9 @@ db.exec(`
     value TEXT NOT NULL
   );
 `);
+
+// Lightweight migrations for already-deployed databases.
+const inviteCols = db.prepare("PRAGMA table_info(invites)").all() as Array<{ name: string }>;
+if (!inviteCols.some((c) => c.name === "allowed_library_ids")) {
+  db.exec("ALTER TABLE invites ADD COLUMN allowed_library_ids TEXT");
+}

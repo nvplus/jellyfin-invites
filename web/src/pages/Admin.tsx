@@ -126,9 +126,27 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [maxUses, setMaxUses] = useState(1);
-  const [expiresInHours, setExpiresInHours] = useState<number | "">("");
-  const [label, setLabel] = useState("");
+  const [expiresInHours, setExpiresInHours] = useState<number>(12);
+  const [allowAll, setAllowAll] = useState(true);
+  const [allowedIds, setAllowedIds] = useState<Set<string>>(new Set());
+  const [libraries, setLibraries] = useState<Array<{ id: string; name: string }>>([]);
+  const [librariesError, setLibrariesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getLibraries()
+      .then((r) => setLibraries(r.libraries))
+      .catch((e) => setLibrariesError((e as Error).message));
+  }, []);
+
+  function toggleLibrary(id: string) {
+    setAllowedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function refresh() {
     try {
@@ -149,11 +167,9 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
     setError(null);
     try {
       await api.createInvite({
-        maxUses: maxUses || 1,
-        expiresInHours: typeof expiresInHours === "number" ? expiresInHours : undefined,
-        label: label.trim() || undefined,
+        expiresInHours,
+        allowedLibraryIds: allowAll ? null : Array.from(allowedIds),
       });
-      setLabel("");
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -183,44 +199,69 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
 
       <h2>Generate invite</h2>
       <form onSubmit={create}>
-        <div className="row">
-          <div className="field">
-            <label htmlFor="label">Label (optional)</label>
-            <input
-              id="label"
-              type="text"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Alice"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="maxUses">Max uses</label>
-            <input
-              id="maxUses"
-              type="number"
-              min={1}
-              value={maxUses}
-              onChange={(e) => setMaxUses(Number(e.target.value))}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="expires">Expires in (hours)</label>
-            <input
-              id="expires"
-              type="number"
-              min={1}
-              value={expiresInHours}
-              onChange={(e) =>
-                setExpiresInHours(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              placeholder="never"
-            />
-          </div>
+        <div className="field">
+          <label htmlFor="expires">Expires in (hours) - Set to 0 for unlimited</label>
+          <input
+            id="expires"
+            type="number"
+            min={0}
+            value={expiresInHours}
+            placeholder={'0 for unlimited'}
+            onChange={(e) => setExpiresInHours(Number(e.target.value))}
+          />
         </div>
-        <button type="submit" disabled={creating}>
-          {creating ? "Creating…" : "Create invite"}
-        </button>
+
+        <div className="field">
+          <label>Library access</label>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}
+          >
+            <input
+              type="checkbox"
+              checked={allowAll}
+              onChange={(e) => setAllowAll(e.target.checked)}
+            />
+            All libraries
+          </label>
+          {!allowAll && (
+            <div
+              style={{
+                border: "1px solid #2a2d35",
+                borderRadius: 6,
+                padding: 10,
+                background: "#1c1e25",
+              }}
+            >
+              {librariesError ? (
+                <div className="error">{librariesError}</div>
+              ) : libraries.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13 }}>
+                  Loading libraries…
+                </div>
+              ) : (
+                libraries.map((lib) => (
+                  <label
+                    key={lib.id}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={allowedIds.has(lib.id)}
+                      onChange={() => toggleLibrary(lib.id)}
+                    />
+                    {lib.name}
+                  </label>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+        <div className='buttonContainer'>
+          <button type="submit" disabled={creating}>
+            {creating ? "Creating…" : "Create invite"}
+          </button>
+        </div>
+
         {error && <div className="error">{error}</div>}
       </form>
 
@@ -233,9 +274,8 @@ function Dashboard({ onLoggedOut }: { onLoggedOut: () => void }) {
         <table>
           <thead>
             <tr>
-              <th>Label</th>
               <th>Status</th>
-              <th>Uses</th>
+              <th>Registered as</th>
               <th>Expires</th>
               <th>Link</th>
               <th></th>
@@ -319,6 +359,7 @@ function Settings() {
               Shown to users after registration.
             </div>
           </div>
+
           <button type="submit" disabled={saving || !jellyfinUrl.trim()}>
             {saving ? "Saving…" : "Save settings"}
           </button>
@@ -334,10 +375,10 @@ function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void 
 
   const status: string = invite.revoked
     ? "revoked"
-    : invite.expiresAt && invite.expiresAt < Date.now()
-      ? "expired"
-      : invite.uses >= invite.maxUses
-        ? "exhausted"
+    : invite.used
+      ? "used"
+      : invite.expiresAt && invite.expiresAt < Date.now()
+        ? "expired"
         : "valid";
 
   async function copy() {
@@ -348,19 +389,18 @@ function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void 
 
   return (
     <tr>
-      <td>{invite.label ?? "—"}</td>
       <td className={`status-${status}`}>{status}</td>
-      <td>
-        {invite.uses} / {invite.maxUses}
-      </td>
+      <td>{invite.registeredAs ?? "—"}</td>
       <td>{invite.expiresAt ? new Date(invite.expiresAt).toLocaleString() : "never"}</td>
       <td className="token">
-        <button className="secondary" onClick={copy}>
-          {copied ? "Copied" : "Copy link"}
-        </button>
+        {status === "valid" && (
+          <button className="secondary" onClick={copy}>
+            {copied ? "Copied" : "Copy link"}
+          </button>
+        )}
       </td>
       <td>
-        {!invite.revoked && status === "valid" && (
+        {status === "valid" && (
           <button className="secondary" onClick={onRevoke}>
             Revoke
           </button>

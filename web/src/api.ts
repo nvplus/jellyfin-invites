@@ -2,10 +2,10 @@ export type Invite = {
   token: string;
   createdAt: number;
   expiresAt: number | null;
-  maxUses: number;
-  uses: number;
+  used: boolean;
   revoked: boolean;
-  label: string | null;
+  registeredAs: string | null;
+  allowedLibraryIds: string[] | null;
 };
 
 export function inviteUrl(token: string): string {
@@ -41,9 +41,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     }).then(json<{ jellyfinUrl: string | null; publicJellyfinUrl: string | null }>),
+  getLibraries: () =>
+    fetch("/api/libraries").then(json<{ libraries: Array<{ id: string; name: string }> }>),
 
   listInvites: () => fetch("/api/invites").then(json<{ invites: Invite[] }>),
-  createInvite: (input: { expiresInHours?: number; maxUses?: number; label?: string }) =>
+  createInvite: (input: {
+    expiresInHours?: number;
+    allowedLibraryIds?: string[] | null;
+  }) =>
     fetch("/api/invites", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
