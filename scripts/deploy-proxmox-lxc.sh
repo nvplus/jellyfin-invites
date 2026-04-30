@@ -12,7 +12,8 @@
 set -euo pipefail
 
 # ---------- config ----------
-CTID="${CTID:-200}"                         # container id on the Proxmox host
+# CTID defaults to (highest existing CT/VM id) + 1, or 100 if none exist.
+CTID="${CTID:-}"
 HOSTNAME="${HOSTNAME:-jellyfin-invites}"
 STORAGE="${STORAGE:-local-lvm}"             # rootfs storage pool
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
@@ -41,6 +42,22 @@ log() { echo "==> $*"; }
 
 command -v pct >/dev/null || err "this script must run on a Proxmox host (pct not found)"
 [[ $EUID -eq 0 ]] || err "run as root on the Proxmox host"
+
+# Pick the next CTID: max(existing CT/VM ids) + 1, floor of 100.
+if [[ -z "$CTID" ]]; then
+  highest=$(
+    {
+      pct list 2>/dev/null | awk 'NR>1 {print $1}'
+      command -v qm >/dev/null && qm list 2>/dev/null | awk 'NR>1 {print $1}'
+    } | grep -E '^[0-9]+$' | sort -n | tail -1
+  )
+  if [[ -n "$highest" ]]; then
+    CTID=$((highest + 1))
+  else
+    CTID=100
+  fi
+  log "auto-selected CTID $CTID"
+fi
 
 if pct status "$CTID" >/dev/null 2>&1; then
   err "CTID $CTID already exists. Set CTID=<unused id> or destroy it first."
